@@ -17,7 +17,8 @@ defmodule SetGame.Application do
       # Start a worker by calling: SetGame.Worker.start_link(arg)
       # {SetGame.Worker, arg},
       # Start to serve requests, typically the last entry
-      SetGameWeb.Endpoint
+      SetGameWeb.Endpoint,
+      SetGame.Game.PlayersRegistry
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

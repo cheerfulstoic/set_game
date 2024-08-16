@@ -7,7 +7,6 @@ defmodule SetGameWeb.StartLive do
     ~H"""
     <div class="container mx-auto">
       <!-- Start or join a game -->
-
       <h1 class="text-3xl font-bold text-center">Welcome to Set Game!</h1>
 
       <form phx-submit="start-or-join" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
@@ -15,7 +14,10 @@ defmodule SetGameWeb.StartLive do
 
         <input name="game_id" placeholder="Game ID (optional)" />
 
-        <.button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+        <.button
+          type="submit"
+          class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+        >
           Start or join a game
         </.button>
       </form>

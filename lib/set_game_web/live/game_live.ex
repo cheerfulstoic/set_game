@@ -34,7 +34,6 @@ defmodule SetGameWeb.GameLive do
           </div>
         <% end %>
       </div>
-
       <!-- showing all players with their associated colors in a grid -->
       <div>
         <%= for player <- @players do %>
@@ -45,8 +44,9 @@ defmodule SetGameWeb.GameLive do
               <%= if player.name == @current_player.name do %>
                 <strong>(you)</strong>
               <% end %>
-              | <%= player.score %>
-              | <%= if player.voted_to_draw_more, do: "*voted to draw more cards*" %>
+              | <%= player.score %> | <%= if player.voted_to_draw_more,
+                do: "*voted to draw more cards*" %>
+              <%= if !player.online, do: "!OFFLINE!*" %>
             </p>
           </div>
         <% end %>
@@ -56,7 +56,6 @@ defmodule SetGameWeb.GameLive do
         <div class="p-4 rounded-lg mt-4">
           <p>
             Last correctly identified set (from <strong><%= @correct_guess.player.name %></strong>):
-
             <div class="grid grid-cols-3 gap-4">
               <%= for card <- @correct_guess.cards do %>
                 <.card card={card} selected_color={nil} />
@@ -65,7 +64,6 @@ defmodule SetGameWeb.GameLive do
           </p>
         </div>
       <% end %>
-
     </div>
     """
   end
@@ -78,24 +76,24 @@ defmodule SetGameWeb.GameLive do
   # border-dotted
   def card(assigns) do
     ~H"""
-    <%
-      fill =
-        case @card.shading do
-          :solid -> @card.color
-          :striped -> "url(#striped-#{@card.color})"
-          :open -> "none"
-        end
-    %>
+    <% fill =
+      case @card.shading do
+        :solid -> @card.color
+        :striped -> "url(#striped-#{@card.color})"
+        :open -> "none"
+      end %>
 
     <div
       class="bg-gray-200 p-4 rounded-lg flex justify-around border-2"
-      style={if(@selected_color, do: "border-color: #{@selected_color}", else: "border-color: transparent")}
+      style={
+        if(@selected_color, do: "border-color: #{@selected_color}", else: "border-color: transparent")
+      }
       phx-click="toggle-card"
       phx-value-count={@card.count}
       phx-value-shape={@card.shape}
       phx-value-shading={@card.shading}
       phx-value-color={@card.color}
-      >
+    >
       <%= for _ <- 1..@card.count do %>
         <!-- Uses flexbox to have them all in a row -->
         <div class={"text-#{@card.color}-500 w-1/3 flex justify-center"}>
@@ -114,18 +112,20 @@ defmodule SetGameWeb.GameLive do
   def shape_path_d(:diamond) do
     "M25 0 L50 50 L25 100 L0 50 Z"
   end
+
   def shape_path_d(:oval) do
     "M25,99.5C14.2,99.5,5.5,90.8,5.5,80V20C5.5,9.2,14.2,0.5,25,0.5S44.5,9.2,44.5,20v60 C44.5,90.8,35.8,99.5,25,99.5z"
   end
+
   def shape_path_d(:squiggle) do
     "M38.4,63.4c0,16.1,11,19.9,10.6,28.3c-0.5,9.2-21.1,12.2-33.4,3.8s-15.8-21.2-9.3-38c3.7-7.5,4.9-14,4.8-20 c0-16.1-11-19.9-10.6-28.3C1,0.1,21.6-3,33.9,5.5s15.8,21.2,9.3,38C40.4,50.6,38.5,57.4,38.4,63.4z"
   end
 
   def mount(%{"id" => _, "name" => ""}, _session, socket) do
     {:ok,
-      socket
-      |> put_flash(:error, "Name is required")
-      |> push_navigate(to: ~p"/")}
+     socket
+     |> put_flash(:error, "Name is required")
+     |> push_navigate(to: ~p"/")}
   end
 
   def mount(%{"id" => game_id, "name" => player_name}, _session, socket) do
@@ -143,15 +143,15 @@ defmodule SetGameWeb.GameLive do
 
     socket =
       if connected?(socket) do
-        case Game.Server.join(game_id, player_name) do
+        case Game.register_as(game_id, player_name) do
           {:ok, current_player} ->
             socket
             |> assign(:current_player, current_player)
 
-          _ ->
+          {:error, exception} ->
             socket
             |> push_navigate(to: ~p"/")
-            |> put_flash(:error, "Player name '#{player_name}' already in use")
+            |> put_flash(:error, Exception.message(exception))
         end
       else
         socket
@@ -168,39 +168,54 @@ defmodule SetGameWeb.GameLive do
     {:noreply, assign(socket, players: players)}
   end
 
-  def handle_info(%{event: "guess_made", payload: %{player: player, cards: guessed_cards, was_a_set: was_a_set?}}, socket) do
-    {:noreply,
-      socket =
+  def handle_info(
+        %{
+          event: "guess_made",
+          payload: %{player: player, cards: guessed_cards, was_a_set: was_a_set?}
+        },
         socket
-        |> assign(:last_guessed_was_set, was_a_set?)
-        |> then(fn socket ->
-          current_player? = player.name == socket.assigns.current_player.name
-          if was_a_set? do
-            socket
-            |> assign(:correct_guess, %{player: player, cards: guessed_cards})
-            |> then(fn socket ->
-              if(current_player?, do: socket, else: put_flash(socket, :info, "#{player.name} found a set!"))
-            end)
-          else
-            socket
-            |> assign(:incorrect_guess, %{player: player, cards: guessed_cards})
-            |> then(fn socket ->
-              if(current_player?, do: socket, else: put_flash(socket, :error, "#{player.name} made an incorrect guess."))
-            end)
-          end
-        end)}
+      ) do
+    {:noreply,
+     socket =
+       socket
+       |> assign(:last_guessed_was_set, was_a_set?)
+       |> then(fn socket ->
+         current_player? = player.name == socket.assigns.current_player.name
+
+         if was_a_set? do
+           socket
+           |> assign(:correct_guess, %{player: player, cards: guessed_cards})
+           |> then(fn socket ->
+             if(current_player?,
+               do: socket,
+               else: put_flash(socket, :info, "#{player.name} found a set!")
+             )
+           end)
+         else
+           socket
+           |> assign(:incorrect_guess, %{player: player, cards: guessed_cards})
+           |> then(fn socket ->
+             if(current_player?,
+               do: socket,
+               else: put_flash(socket, :error, "#{player.name} made an incorrect guess.")
+             )
+           end)
+         end
+       end)}
   end
 
-
-  def handle_event("toggle-card", %{"count" => count, "shape" => shape, "shading" => shading, "color" => color}, socket) do
-    # Game.Server.toggle_card(%{count: count, shape: shape, shading: shading, color: color})
-
+  def handle_event(
+        "toggle-card",
+        %{"count" => count, "shape" => shape, "shading" => shading, "color" => color},
+        socket
+      ) do
     new_selected_card = %{
       count: String.to_integer(count),
       shape: String.to_existing_atom(shape),
       shading: String.to_existing_atom(shading),
       color: String.to_existing_atom(color)
     }
+
     socket =
       socket
       |> update(:selected_cards, fn cards ->
@@ -214,12 +229,12 @@ defmodule SetGameWeb.GameLive do
         cards = socket.assigns.selected_cards
 
         if MapSet.size(cards) == 3 do
-          case Game.Server.submit_guess(socket.assigns.game_id, cards) do
-            :correct ->
+          case Game.submit_guess(socket.assigns.game_id, cards) do
+            {:ok, :correct} ->
               socket
               |> put_flash(:info, "CORRECT!")
 
-            :incorrect ->
+            {:ok, :incorrect} ->
               socket
               |> put_flash(:error, "NOT A SET")
           end
@@ -233,7 +248,7 @@ defmodule SetGameWeb.GameLive do
   end
 
   def handle_event("vote-to-draw-more", _, socket) do
-    :ok = Game.Server.vote_to_draw_more(socket.assigns.game_id)
+    :ok = Game.vote_to_draw_more(socket.assigns.game_id)
 
     {:noreply, socket}
   end

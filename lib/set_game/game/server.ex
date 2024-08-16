@@ -1,11 +1,34 @@
 defmodule SetGame.Game.Server do
   alias SetGame.Game.Deck
+  alias SetGame.Game.PlayersRegistry
+
+  @colors MapSet.new(~w[
+    #191970
+    #006400
+    #ff0000
+    #ffd700
+    #00ff00
+    #00ffff
+    #ff00ff
+    #ffb6c1
+  ])
 
   use GenServer
 
+  defmodule Player do
+    defstruct name: nil, color: nil, score: 0, voted_to_draw_more: false, online: true
+
+    def new(player_name, color) when is_binary(player_name) and is_binary(color) do
+      %Player{
+        name: player_name,
+        color: color
+      }
+    end
+  end
+
   def start do
     new_id =
-      (1..5)
+      1..5
       |> Enum.map(fn _ -> 64 + :rand.uniform(26) end)
       |> to_string()
 
@@ -14,89 +37,45 @@ defmodule SetGame.Game.Server do
     end
   end
 
-  def join(id, player_name) do
-    case Process.whereis(name(id)) do
-      nil ->
-        {:error, :not_found}
-
-      pid ->
-        Process.link(pid)
-
-        GenServer.call(pid, {:join, player_name})
+  def register_as(game_id, player_name) do
+    with {:ok, standardized_name} <- PlayersRegistry.register_as(game_id, player_name) do
+      call(game_id, {:register_as, {player_name, standardized_name}})
     end
   end
 
-  def submit_guess(id, cards) do
-    GenServer.call(name(id), {:submit_guess, cards})
+  # def send_updates(game_id) do
+  #   send(name(game_id), :send_updates)
+  # end
+
+  # def send_player_update(game_id) do
+  #   send(name(game_id), :send_player_update)
+  # end
+
+  defmodule GameNotFoundError do
+    defexception [:game_id]
+
+    def exception(game_id) do
+      %__MODULE__{game_id: game_id}
+    end
+
+    def message(%__MODULE__{game_id: game_id}) do
+      "Game with ID #{game_id} not found"
+    end
   end
 
-  def vote_to_draw_more(id) do
-    GenServer.call(name(id), :vote_to_draw_more)
+  def call(game_id, message) do
+    case Process.whereis(name(game_id)) do
+      nil -> {:error, GameNotFoundError.exception(game_id)}
+      pid -> GenServer.call(pid, message)
+    end
   end
 
-  defmodule Players do
-    @colors MapSet.new(~w[
-      #191970
-      #006400
-      #ff0000
-      #ffd700
-      #00ff00
-      #00ffff
-      #ff00ff
-      #ffb6c1
-    ])
+  def submit_guess(game_id, cards) do
+    GenServer.call(name(game_id), {:submit_guess, cards})
+  end
 
-    def new, do: %{}
-
-    def to_list(players), do: Map.values(players)
-    def pids(players), do: Map.keys(players)
-
-    def get(players, pid), do: Map.get(players, pid)
-
-    def delete(players, pid), do: Map.delete(players, pid)
-
-    def add_player(players, pid, player_name) do
-      if name_used?(players, player_name) do
-        {:error, "Player name already in use"}
-      else
-        new_player =
-          %{
-            name: player_name,
-            color: new_color(players),
-            score: 0,
-            voted_to_draw_more: false
-          }
-
-        {:ok, {Map.put(players, pid, new_player), new_player}}
-      end
-    end
-
-    def adjust_score(players, pid, amount) do
-      update_player(players, pid, fn player -> Map.update!(player, :score, & &1 + amount) end)
-    end
-
-    def mark_voted_to_draw_more(players, pid) do
-      update_player(players, pid, fn player -> Map.put(player, :voted_to_draw_more, true) end)
-    end
-
-    def all_ready_to_draw?(players), do: Enum.all?(players, fn {_, p} -> p.voted_to_draw_more end)
-
-    def reset_ready_to_draw(players) do
-      Map.new(players, fn {pid, player} -> {pid, Map.put(player, :voted_to_draw_more, false)} end)
-    end
-
-    defp update_player(players, pid, update_fn) do
-      Map.update!(players, pid, update_fn)
-    end
-
-    def name_used?(players, name), do: name in Enum.map(players, fn {_, p} -> p.name end)
-    def color_used?(players, color), do: color in Enum.map(players, fn {_, p} -> p.color end)
-
-    defp new_color(players) do
-      used_colors = Enum.map(players, fn {_, p} -> p.color end)
-
-      Enum.find(@colors, fn color -> color not in used_colors end)
-    end
+  def vote_to_draw_more(game_id) do
+    GenServer.call(name(game_id), :vote_to_draw_more)
   end
 
   def init(game_id) do
@@ -106,26 +85,40 @@ defmodule SetGame.Game.Server do
 
     {face_up_cards, deck} = Deck.draw(deck, 12)
 
-    Process.flag(:trap_exit, true)
-
-    {:ok, %{
-      game_id: game_id,
-      face_up_cards: face_up_cards,
-      draw_pile: deck,
-      players: Players.new()
-    }}
+    {:ok,
+     %{
+       game_id: game_id,
+       face_up_cards: face_up_cards,
+       draw_pile: deck,
+       players: %{}
+     }}
   end
 
-  def handle_call({:join, player_name}, {pid, _}, state) do
-    case Players.add_player(state.players, pid, player_name) do
-      {:ok, {players, new_player}} ->
+  defmodule NoMoreColorsAvailableError do
+    defexception message: "No more colors available"
+
+    def exception, do: %__MODULE__{}
+  end
+
+  def handle_call({:register_as, {player_name, standardized_name}}, {pid, _}, state) do
+    Process.monitor(pid)
+
+    used_colors = Enum.map(state.players, fn {_, player} -> player.color end)
+
+    @colors
+    |> Enum.find(fn color -> color not in used_colors end)
+    |> case do
+      nil ->
+        {:reply, {:error, NoMoreColorsAvailableError.exception()}, state}
+
+      unused_color ->
+        player = Player.new(player_name, unused_color)
+
         send(self(), :send_updates)
         send(self(), :send_player_update)
 
-        {:reply, {:ok, new_player}, Map.put(state, :players, players)}
-
-      {:error, message} ->
-        {:reply, {:error, message}, state}
+        {:reply, {:ok, player},
+         Map.update!(state, :players, &Map.put(&1, standardized_name, player))}
     end
   end
 
@@ -134,11 +127,12 @@ defmodule SetGame.Game.Server do
 
     state =
       if was_a_set? do
-        face_up_cards = Enum.map(state.face_up_cards, fn card ->
-          if card not in guessed_cards do
-            card
-          end
-        end)
+        face_up_cards =
+          Enum.map(state.face_up_cards, fn card ->
+            if card not in guessed_cards do
+              card
+            end
+          end)
 
         state
         |> Map.put(:face_up_cards, face_up_cards)
@@ -148,20 +142,32 @@ defmodule SetGame.Game.Server do
         state
       end
 
-    state = Map.update!(state, :players, & Players.adjust_score(&1, pid, if(was_a_set?, do: 1, else: -1)))
+    state =
+      update_player(state, pid, fn player ->
+        adjustment = if(was_a_set?, do: 1, else: -1)
 
-    broadcast(state, "guess_made", %{player: Players.get(state.players, pid), cards: guessed_cards, was_a_set: was_a_set?})
+        Map.update!(player, :score, &(&1 + adjustment))
+      end)
+
+    broadcast(state.game_id, "guess_made", %{
+      player: get_player(state, pid),
+      cards: guessed_cards,
+      was_a_set: was_a_set?
+    })
+
     send(self(), :send_player_update)
 
-    {:reply, if(was_a_set?, do: :correct, else: :incorrect), state}
+    {:reply, {:ok, if(was_a_set?, do: :correct, else: :incorrect)}, state}
   end
 
   def handle_call(:vote_to_draw_more, {pid, _}, state) do
     state =
-      Map.update!(state, :players, & Players.mark_voted_to_draw_more(&1, pid))
+      state
+      |> update_player(pid, fn player -> Map.put(player, :voted_to_draw_more, true) end)
       |> then(fn state ->
-        if Players.all_ready_to_draw?(state.players) do
-        dbg(state)
+        all_ready_to_draw? = Enum.all?(players(state), fn player -> player.voted_to_draw_more end)
+
+        if all_ready_to_draw? do
           {new_face_up_cards, draw_pile} = Deck.draw(state.draw_pile, 3)
 
           dbg(new_face_up_cards)
@@ -169,7 +175,11 @@ defmodule SetGame.Game.Server do
           send(self(), :send_updates)
 
           state
-          |> Map.update!(:players, & Players.reset_ready_to_draw/1)
+          |> Map.update!(:players, fn players ->
+            Map.new(players, fn {name, player} ->
+              {name, Map.put(player, :voted_to_draw_more, false)}
+            end)
+          end)
           |> Map.update!(:face_up_cards, fn face_up_cards ->
             {face_up_cards, new_face_up_cards} =
               Enum.map_reduce(face_up_cards, new_face_up_cards, fn
@@ -192,45 +202,70 @@ defmodule SetGame.Game.Server do
   end
 
   def handle_info(:send_updates, state) do
-    broadcast(state, "game_update", %{face_up_cards: state.face_up_cards})
+    broadcast(state.game_id, "game_update", %{face_up_cards: state.face_up_cards})
 
     {:noreply, state}
   end
 
   def handle_info(:send_player_update, state) do
-    broadcast(state, "players_update", %{players: Players.to_list(state.players)})
+    broadcast(state.game_id, "players_update", %{players: Map.values(state.players)})
 
     {:noreply, state}
   end
 
-  def handle_info({:EXIT, exited_pid, :shutdown}, state) do
-    {:noreply, cleanup_player(state, exited_pid)}
-  end
+  # def handle_info({:EXIT, exited_pid, :shutdown}, state) do
+  #   {:noreply, cleanup_player(state, exited_pid)}
+  # end
 
-  def handle_info({:EXIT, exited_pid, {:shutdown, :closed}}, state) do
-    {:noreply, cleanup_player(state, exited_pid)}
-  end
+  # def handle_info({:EXIT, exited_pid, {:shutdown, :closed}}, state) do
+  #   {:noreply, cleanup_player(state, exited_pid)}
+  # end
 
   def handle_info({:EXIT, _pid, reason}, state) do
-    Logger.warn("UNEXPECTED EXIT: with reason #{inspect reason}")
+    Logger.warn("UNEXPECTED EXIT: with reason #{inspect(reason)}")
 
     {:stop, reason, state}
   end
 
-  defp cleanup_player(state, given_pid) do
-    send(self(), :send_player_update)
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    IO.inspect(reason, label: :DOWN_REASON)
 
-    Map.update!(state, :players, & Players.delete(&1, given_pid))
+    update_player(state, pid, fn player -> Map.put(player, :online, false) end)
+
+    {:noreply, state}
   end
 
-  defp broadcast(state, event, payload) do
-    # Phoenix.PubSub.broadcast(SetGame.PubSub, "game:#{state.game_id}", %{event: event, payload: payload})
-    for pid <- Players.pids(state.players) do
+  # defp cleanup_player(state, given_pid) do
+  #   send(self(), :send_player_update)
+
+  #   Map.update!(state, :players, & Players.delete(&1, given_pid))
+  # end
+
+  defp update_player(state, pid, adjustment) do
+    standardized_name = PlayersRegistry.get(state.game_id, pid)
+
+    state
+    |> Map.update!(:players, &Map.update!(&1, standardized_name, adjustment))
+  end
+
+  def get_player(state, pid) do
+    standardized_name = PlayersRegistry.get(state.game_id, pid)
+
+    Map.get(state.players, standardized_name)
+  end
+
+  def players(state) do
+    PlayersRegistry.names(state.game_id)
+    |> Enum.map(&Map.get(state.players, &1))
+  end
+
+  defp broadcast(game_id, event, payload) do
+    for pid <- PlayersRegistry.pids(game_id) do
       send(pid, %{event: event, payload: payload})
     end
   end
 
-  defp name(id) do
-    :"#{__MODULE__}-#{id}"
+  defp name(game_id) do
+    :"#{__MODULE__}-#{game_id}"
   end
 end

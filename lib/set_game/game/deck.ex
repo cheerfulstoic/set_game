@@ -17,7 +17,8 @@ defmodule SetGame.Game.Deck do
 
   # FIXME: Temporary implementation for testing!
   def shuffle(deck) do
-  IO.puts("SHUFFLING!")
+    IO.puts("SHUFFLING!")
+
     Enum.shuffle(deck)
     |> then(fn deck ->
       if set?(Enum.take(deck, 3)) do
