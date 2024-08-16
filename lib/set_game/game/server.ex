@@ -20,8 +20,6 @@ defmodule SetGame.Game.Server do
         {:error, :not_found}
 
       pid ->
-        Process.link(pid)
-
         GenServer.call(pid, {:join, player_name})
     end
   end
@@ -35,16 +33,61 @@ defmodule SetGame.Game.Server do
   end
 
   defmodule Players do
+    # From: https://mokole.com/palette.html
+    #@colors MapSet.new(~w[
+    #  #191970
+    #  #006400
+    #  #ff0000
+    #  #ffd700
+    #  #00ff00
+    #  #00ffff
+    #  #ff00ff
+    #  #ffb6c1
+    #])
+
+    # From: https://mokole.com/palette.html
+    #@colors MapSet.new(~w[
+    #  #2f4f4f
+    #  #8b4513
+    #  #228b22
+    #  #4b0082
+    #  #ff0000
+    #  #00ff00
+    #  #00ffff
+    #  #0000ff
+    #  #ff00ff
+    #  #ffff54
+    #  #6495ed
+    #  #ff69b4
+    #  #ffe4c4
+    #])
+
+    # From: https://sashamaps.net/docs/resources/20-colors/
     @colors MapSet.new(~w[
-      #191970
-      #006400
-      #ff0000
-      #ffd700
-      #00ff00
-      #00ffff
-      #ff00ff
-      #ffb6c1
+      #e6194b
+      #3cb44b
+      #ffe119
+      #4363d8
+      #f58231
+      #911eb4
+      #46f0f0
+      #f032e6
+      #bcf60c
+      #fabebe
+      #008080
+      #e6beff
+      #9a6324
+      #fffac8
+      #800000
+      #aaffc3
+      #808000
+      #ffd8b1
+      #000075
+      #808080
+      #ffffff
+      #000000
     ])
+
 
     def new, do: %{}
 
@@ -203,23 +246,13 @@ defmodule SetGame.Game.Server do
     {:noreply, state}
   end
 
-  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+  def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
     {:noreply, cleanup_player(state, pid)}
   end
 
-  # def handle_info({:EXIT, exited_pid, :shutdown}, state) do
-  #   {:noreply, cleanup_player(state, exited_pid)}
-  # end
-
-  # def handle_info({:EXIT, exited_pid, {:shutdown, :closed}}, state) do
-  #   {:noreply, cleanup_player(state, exited_pid)}
-  # end
-
-  # def handle_info({:EXIT, _pid, reason}, state) do
-  #   Logger.warn("UNEXPECTED EXIT: with reason #{inspect reason}")
-
-  #   {:stop, reason, state}
-  # end
+  def handle_info(message, state) do
+    {:noreply, state}
+  end
 
   defp cleanup_player(state, given_pid) do
     send(self(), :send_player_update)
