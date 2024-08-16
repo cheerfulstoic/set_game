@@ -15,22 +15,22 @@ defmodule SetGame.Game.Deck do
     end
   end
 
-  # FIXME: Temporary implementation for testing!
-  def shuffle(deck) do
-  IO.puts("SHUFFLING!")
-    Enum.shuffle(deck)
-    |> then(fn deck ->
-      if set?(Enum.take(deck, 3)) do
-        deck
-      else
-        shuffle(deck)
-      end
-    end)
-  end
-
+  # # FIXME: Temporary implementation for testing!
   # def shuffle(deck) do
+  # IO.puts("SHUFFLING!")
   #   Enum.shuffle(deck)
+  #   |> then(fn deck ->
+  #     if set?(Enum.take(deck, 3)) do
+  #       deck
+  #     else
+  #       shuffle(deck)
+  #     end
+  #   end)
   # end
+
+  def shuffle(deck) do
+    Enum.shuffle(deck)
+  end
 
   def draw(deck, n) do
     Enum.split(deck, n)
