@@ -106,8 +106,6 @@ defmodule SetGame.Game.Server do
 
     {face_up_cards, deck} = Deck.draw(deck, 12)
 
-    Process.flag(:trap_exit, true)
-
     {:ok, %{
       game_id: game_id,
       face_up_cards: face_up_cards,
@@ -117,6 +115,8 @@ defmodule SetGame.Game.Server do
   end
 
   def handle_call({:join, player_name}, {pid, _}, state) do
+    Process.monitor(pid)
+
     case Players.add_player(state.players, pid, player_name) do
       {:ok, {players, new_player}} ->
         send(self(), :send_updates)
@@ -203,19 +203,23 @@ defmodule SetGame.Game.Server do
     {:noreply, state}
   end
 
-  def handle_info({:EXIT, exited_pid, :shutdown}, state) do
-    {:noreply, cleanup_player(state, exited_pid)}
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    {:noreply, cleanup_player(state, pid)}
   end
 
-  def handle_info({:EXIT, exited_pid, {:shutdown, :closed}}, state) do
-    {:noreply, cleanup_player(state, exited_pid)}
-  end
+  # def handle_info({:EXIT, exited_pid, :shutdown}, state) do
+  #   {:noreply, cleanup_player(state, exited_pid)}
+  # end
 
-  def handle_info({:EXIT, _pid, reason}, state) do
-    Logger.warn("UNEXPECTED EXIT: with reason #{inspect reason}")
+  # def handle_info({:EXIT, exited_pid, {:shutdown, :closed}}, state) do
+  #   {:noreply, cleanup_player(state, exited_pid)}
+  # end
 
-    {:stop, reason, state}
-  end
+  # def handle_info({:EXIT, _pid, reason}, state) do
+  #   Logger.warn("UNEXPECTED EXIT: with reason #{inspect reason}")
+
+  #   {:stop, reason, state}
+  # end
 
   defp cleanup_player(state, given_pid) do
     send(self(), :send_player_update)
