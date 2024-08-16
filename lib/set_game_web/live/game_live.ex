@@ -124,7 +124,7 @@ defmodule SetGameWeb.GameLive do
   def mount(%{"id" => _, "name" => ""}, _session, socket) do
     {:ok,
       socket
-      |> put_flash(:error, "Name is required")
+      |> put_fading_flash(:error, "Name is required")
       |> push_navigate(to: ~p"/")}
   end
 
@@ -151,7 +151,7 @@ defmodule SetGameWeb.GameLive do
           _ ->
             socket
             |> push_navigate(to: ~p"/")
-            |> put_flash(:error, "Player name '#{player_name}' already in use")
+            |> put_fading_flash(:error, "Player name '#{player_name}' already in use")
         end
       else
         socket
@@ -176,16 +176,27 @@ defmodule SetGameWeb.GameLive do
         |> then(fn socket ->
           current_player? = player.name == socket.assigns.current_player.name
           if was_a_set? do
+            no_shared_cards_with_guess? =
+              MapSet.new(guessed_cards)
+              |> MapSet.disjoint?(socket.assigns.selected_cards)
+
             socket
             |> assign(:correct_guess, %{player: player, cards: guessed_cards})
             |> then(fn socket ->
-              if(current_player?, do: socket, else: put_flash(socket, :info, "#{player.name} found a set!"))
+              if no_shared_cards_with_guess? do
+                socket
+              else
+                assign(socket, :selected_cards, MapSet.new())
+              end
+            end)
+            |> then(fn socket ->
+              if(current_player?, do: socket, else: put_fading_flash(socket, :info, "#{player.name} found a set!"))
             end)
           else
             socket
             |> assign(:incorrect_guess, %{player: player, cards: guessed_cards})
             |> then(fn socket ->
-              if(current_player?, do: socket, else: put_flash(socket, :error, "#{player.name} made an incorrect guess."))
+              if(current_player?, do: socket, else: put_fading_flash(socket, :error, "#{player.name} made an incorrect guess."))
             end)
           end
         end)}
@@ -217,11 +228,11 @@ defmodule SetGameWeb.GameLive do
           case Game.Server.submit_guess(socket.assigns.game_id, cards) do
             :correct ->
               socket
-              |> put_flash(:info, "CORRECT!")
+              |> put_fading_flash(:info, "CORRECT!")
 
             :incorrect ->
               socket
-              |> put_flash(:error, "NOT A SET")
+              |> put_fading_flash(:error, "NOT A SET")
           end
           |> assign(:selected_cards, MapSet.new())
         else
@@ -236,5 +247,15 @@ defmodule SetGameWeb.GameLive do
     :ok = Game.Server.vote_to_draw_more(socket.assigns.game_id)
 
     {:noreply, socket}
+  end
+
+  def put_fading_flash(socket, type, message) do
+    Process.send_after(self(), :clear_flash, 7_000)
+
+    put_flash(socket, type, message)
+  end
+
+  def handle_info(:clear_flash, socket) do
+    {:noreply, clear_flash(socket)}
   end
 end
