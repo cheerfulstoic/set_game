@@ -17,17 +17,20 @@ defmodule SetGameWeb.GameLive do
         <path d="M-1,1 H5" style="stroke:#8e44ad; stroke-width:1"></path>
       </pattern>
     </svg>
-    <div class="container mx-auto">
+    <div class="x-auto">
       <p>Game ID: <strong><%= @game_id %></strong></p>
       <.button phx-click="vote-to-draw-more">Vote to Draw More</.button>
 
-      <div class="border-2 rounded-lg m-4 p-4 grid grid-cols-3 gap-4">
+      <div class="border-2 rounded-lg m-2 p-1 grid grid-cols-3 gap-2">
         <%= for card <- @face_up_cards do %>
-          <div class="h-16">
+          <div>
             <%= if card do %>
-              <% selected? = MapSet.member?(@selected_cards, card) %>
+              <%
+                selected? = MapSet.member?(@selected_cards, card)
+                incorrect_guess? = @incorrect_guess && card in @incorrect_guess.cards
+              %>
 
-              <.card card={card} selected_color={if(selected?, do: @current_player.color)} />
+              <.card card={card} selected_color={if(selected?, do: @current_player.color)} class={if(incorrect_guess?, do: "horizontal-shake")} />
             <% else %>
               <div>&nbsp;</div>
             <% end %>
@@ -76,6 +79,7 @@ defmodule SetGameWeb.GameLive do
   # text-purple-500
   # border-solid
   # border-dotted
+  attr :class, :string, default: nil
   def card(assigns) do
     ~H"""
     <%
@@ -88,7 +92,7 @@ defmodule SetGameWeb.GameLive do
     %>
 
     <div
-      class="bg-gray-200 p-4 rounded-lg flex justify-around border-2"
+      class={["bg-gray-200 p-4 rounded-lg flex justify-around border-2 m-1", @class]}
       style={if(@selected_color, do: "border-color: #{@selected_color}", else: "border-color: transparent")}
       phx-click="toggle-card"
       phx-value-count={@card.count}
@@ -193,6 +197,8 @@ defmodule SetGameWeb.GameLive do
               if(current_player?, do: socket, else: put_fading_flash(socket, :info, "#{player.name} found a set!"))
             end)
           else
+            Process.send_after(self(), :clear_incorrect_guess, 1_700)
+
             socket
             |> assign(:incorrect_guess, %{player: player, cards: guessed_cards})
             |> then(fn socket ->
@@ -250,9 +256,13 @@ defmodule SetGameWeb.GameLive do
   end
 
   def put_fading_flash(socket, type, message) do
-    Process.send_after(self(), :clear_flash, 7_000)
+    Process.send_after(self(), :clear_flash, 2_000)
 
     put_flash(socket, type, message)
+  end
+
+  def handle_info(:clear_incorrect_guess, socket) do
+    {:noreply, assign(socket, incorrect_guess: nil)}
   end
 
   def handle_info(:clear_flash, socket) do

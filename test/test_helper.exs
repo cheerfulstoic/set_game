@@ -1,2 +1,3 @@
 ExUnit.start()
-Ecto.Adapters.SQL.Sandbox.mode(SetGame.Repo, :manual)
+:ok = Ecto.Adapters.SQL.Sandbox.mode(SetGame.Repo, :manual)
+
